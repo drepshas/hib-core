@@ -22,13 +22,19 @@
  * Boston, MA  02110-1301  USA
  */
 package org.hibernate.dialect;
+import java.sql.CallableStatement;
+import java.sql.ResultSet;
 import java.sql.Types;
 
 import org.hibernate.HibernateException;
 import org.hibernate.cfg.Environment;
 import org.hibernate.dialect.function.SQLFunctionTemplate;
+import org.hibernate.dialect.function.StandardSQLFunction;
 import org.hibernate.dialect.function.VarArgsSQLFunction;
+import org.hibernate.exception.spi.TemplatedViolatedConstraintNameExtracter;
+import org.hibernate.exception.spi.ViolatedConstraintNameExtracter;
 import org.hibernate.type.StandardBasicTypes;
+import java.sql.SQLException;
 
 /**
  * A dialect for the Teradata database created by MCR as part of the
@@ -48,12 +54,13 @@ public class TeradataDialect extends Dialect {
 		//registerColumnType data types
 		registerColumnType( Types.NUMERIC, "NUMERIC($p,$s)" );
 		registerColumnType( Types.DOUBLE, "DOUBLE PRECISION" );
-		registerColumnType( Types.BIGINT, "NUMERIC(18,0)" );
+		registerColumnType( Types.BIGINT, "BIGINT" );
 		registerColumnType( Types.BIT, "BYTEINT" );
 		registerColumnType( Types.TINYINT, "BYTEINT" );
 		registerColumnType( Types.VARBINARY, "VARBYTE($l)" );
-		registerColumnType( Types.BINARY, "BYTEINT" );
-		registerColumnType( Types.LONGVARCHAR, "LONG VARCHAR" );
+		registerColumnType( Types.BINARY, "VARBYTE(100)" );
+		registerColumnType( Types.LONGVARBINARY, "VARBYTE(32000)" );
+		registerColumnType( Types.LONGVARCHAR, "VARCHAR(32000)" );
 		registerColumnType( Types.CHAR, "CHAR(1)" );
 		registerColumnType( Types.DECIMAL, "DECIMAL" );
 		registerColumnType( Types.INTEGER, "INTEGER" );
@@ -84,14 +91,9 @@ public class TeradataDialect extends Dialect {
 				"bit_length", new SQLFunctionTemplate( StandardBasicTypes.INTEGER, "octet_length(cast(?1 as char))*4" )
 		);
 
-		// The preference here would be
-		//   SQLFunctionTemplate( StandardBasicTypes.TIMESTAMP, "current_timestamp(?1)", false)
-		// but this appears not to work.
-		// Jay Nance 2006-09-22
 		registerFunction( "current_timestamp", new SQLFunctionTemplate( StandardBasicTypes.TIMESTAMP, "current_timestamp" ) );
-		registerFunction( "current_time", new SQLFunctionTemplate( StandardBasicTypes.TIMESTAMP, "current_time" ) );
-		registerFunction( "current_date", new SQLFunctionTemplate( StandardBasicTypes.TIMESTAMP, "current_date" ) );
-		// IBID for current_time and current_date
+		registerFunction( "current_time", new SQLFunctionTemplate( StandardBasicTypes.TIME, "current_time" ) );
+		registerFunction( "current_date", new SQLFunctionTemplate( StandardBasicTypes.DATE, "current_date" ) );
 
 		registerKeyword( "password" );
 		registerKeyword( "type" );
@@ -106,10 +108,8 @@ public class TeradataDialect extends Dialect {
 		registerKeyword( "account" );
 		registerKeyword( "class" );
 
-		// Tell hibernate to use getBytes instead of getBinaryStream
-		getDefaultProperties().setProperty( Environment.USE_STREAMS_FOR_BINARY, "false" );
-		// No batch statements
-		getDefaultProperties().setProperty( Environment.STATEMENT_BATCH_SIZE, NO_BATCH );
+		getDefaultProperties().setProperty( Environment.USE_STREAMS_FOR_BINARY, "true" );
+		getDefaultProperties().setProperty( Environment.STATEMENT_BATCH_SIZE,DEFAULT_BATCH_SIZE );
 	}
 
 	/**
@@ -117,38 +117,47 @@ public class TeradataDialect extends Dialect {
 	 *
 	 * @return empty string ... Teradata does not support <tt>FOR UPDATE<tt> syntax
 	 */
+	@Override
 	public String getForUpdateString() {
 		return "";
 	}
 
+	@Override
 	public boolean supportsIdentityColumns() {
-		return false;
+		return true;
 	}
 
+	@Override
 	public boolean supportsSequences() {
 		return false;
 	}
 
+	@Override
 	public String getAddColumnString() {
-		return "Add Column";
+		return "Add";
 	}
 
+	@Override
 	public boolean supportsTemporaryTables() {
 		return true;
 	}
 
+	@Override
 	public String getCreateTemporaryTableString() {
 		return "create global temporary table";
 	}
 
+	@Override
 	public String getCreateTemporaryTablePostfix() {
 		return " on commit preserve rows";
 	}
 
+	@Override
 	public Boolean performTemporaryTableDDLInIsolation() {
 		return Boolean.TRUE;
 	}
 
+	@Override
 	public boolean dropTemporaryTableAfterUse() {
 		return false;
 	}
@@ -166,34 +175,39 @@ public class TeradataDialect extends Dialect {
 	 *
 	 * @throws HibernateException
 	 */
-	public String getTypeName(int code, int length, int precision, int scale) throws HibernateException {
+	 public String getTypeName(int code, int length, int precision, int scale) throws HibernateException {
 		/*
 		 * We might want a special case for 19,2. This is very common for money types
 		 * and here it is converted to 18,1
 		 */
 		float f = precision > 0 ? ( float ) scale / ( float ) precision : 0;
-		int p = ( precision > 18 ? 18 : precision );
-		int s = ( precision > 18 ? ( int ) ( 18.0 * f ) : ( scale > 18 ? 18 : scale ) );
+		int p = ( precision > 38 ? 38 : precision );
+		int s = ( precision > 38 ? ( int ) ( 38.0 * f ) : ( scale > 38 ? 38 : scale ) );
 
 		return super.getTypeName( code, length, p, s );
 	}
 
+	@Override
 	public boolean supportsCascadeDelete() {
 		return false;
 	}
 
+	@Override
 	public boolean supportsCircularCascadeDeleteConstraints() {
 		return false;
 	}
 
+	@Override
 	public boolean areStringComparisonsCaseInsensitive() {
-		return true;
+		return false;
 	}
 
+	@Override
 	public boolean supportsEmptyInList() {
 		return false;
 	}
 
+	@Override
 	public String getSelectClauseNullString(int sqlType) {
 		String v = "null";
 
@@ -239,24 +253,24 @@ public class TeradataDialect extends Dialect {
 		return v;
 	}
 
+	@Override
 	public String getCreateMultisetTableString() {
 		return "create multiset table ";
 	}
 
+	@Override
 	public boolean supportsLobValueChangePropogation() {
 		return false;
 	}
 
+	@Override
 	public boolean doesReadCommittedCauseWritersToBlockReaders() {
 		return true;
 	}
 
+	@Override
 	public boolean doesRepeatableReadCauseReadersToBlockWriters() {
 		return true;
-	}
-
-	public boolean supportsBindAsCallableArgument() {
-		return false;
 	}
 
 	/* (non-Javadoc)
@@ -266,4 +280,145 @@ public class TeradataDialect extends Dialect {
 	public int getInExpressionCountLimit() {
 		return PARAM_LIST_SIZE_LIMIT;
 	}
+
+	@Override
+    public boolean constraintRequiresFunction() {
+        return true;
+    }
+
+	@Override
+	public String[] generateConstraintFunctionSql(String alter, String tableName, String constraintName) {
+		String[] results = new String[2];
+		if (tableName.length() > 28) {
+			tableName = tableName.substring(0, 28);
+		}
+		results[0] =
+				"REPLACE PROCEDURE dropConstraintTable " +
+						"(IN alterCmd VARCHAR(300), IN tblName VARCHAR(300), IN constraintName VARCHAR(50)) " +
+						"BEGIN " +
+						"DECLARE lclRes VARCHAR(300); " +
+						"DECLARE SqlStr VARCHAR(300); " +
+						"DECLARE C1 CURSOR FOR S1; " +
+
+						"CALL DBC.SYSEXECSQL( alterCmd);" +
+						"CALL DBC.SYSEXECSQL( 'commit work');" +
+
+						"SET SqlStr = 'SELECT trim(IndexID) as t1 from dbc.RI_Distinct_ChildrenV where IndexName=?';" +
+						"PREPARE S1 FROM SqlStr;" +
+						"OPEN C1 USING constraintName;" +
+
+						"FETCH C1 into lclRes;" +
+						"Set SQLStr = 'DROP Table ' || tblname || '_' || lclRes;" +
+						"CALL DBC.SYSEXECSQL( SQLStr);" +
+						"CLOSE C1;" +
+						"END;";
+
+		results[1] = "{CALL dropConstraintTable(" +
+				"'" + alter + "' ," +
+				"'" + tableName + "' ," +
+				"'" + constraintName + "' " +
+				")}";
+		return results;
+	}
+
+	@Override
+	public String getIdentityColumnString() {
+		return "generated by default as identity not null";
+	}
+
+	@Override
+	public String getIdentityInsertString() {
+		return "null";
+	}
+
+	@Override
+	public String getDropTemporaryTableString() {
+		return "drop temporary table";
+	}
+
+	@Override
+	public boolean supportsExpectedLobUsagePattern() {
+		return true;
+	}
+
+	@Override
+	public ViolatedConstraintNameExtracter getViolatedConstraintNameExtracter() {
+		return EXTRACTER;
+	}
+
+
+	@Override
+	public boolean supportsTupleDistinctCounts() {
+		return false;
+	}
+
+
+	@Override
+	public boolean doesIndexNameRequireColumnNames() {
+		return true;
+	}
+
+	@Override
+	public boolean supportsExistsInSelect() {
+		return false;
+	}
+
+
+	@Override
+	public boolean supportsUnboundedLobLocatorMaterialization() {
+		return false;
+	}
+
+	@Override
+	public boolean supportsLockTimeouts() {
+		return false;
+
+	}
+
+	@Override
+	public int registerResultSetOutParameter(CallableStatement statement, int col) throws SQLException {
+		statement.registerOutParameter(col, Types.REF);
+		col++;
+		return col;
+	}
+
+	@Override
+	public ResultSet getResultSet(CallableStatement cs) throws SQLException {
+		boolean isResultSet = cs.execute();
+		while (!isResultSet && cs.getUpdateCount() != -1) {
+			isResultSet = cs.getMoreResults();
+		}
+		return cs.getResultSet();
+	}
+
+	private static ViolatedConstraintNameExtracter EXTRACTER = new TemplatedViolatedConstraintNameExtracter() {
+		/**
+		 * Extract the name of the violated constraint from the given SQLException.
+		 *
+		 * @param sqle The exception that was the result of the constraint violation.
+		 * @return The extracted constraint name.
+		 */
+		@Override
+		public String extractConstraintName(SQLException sqle) {
+			String constraintName = null;
+
+			int errorCode = sqle.getErrorCode();
+			if (errorCode == 27003) {
+				constraintName = extractUsingTemplate("Unique constraint (", ") violated.", sqle.getMessage());
+			} else if (errorCode == 2700) {
+				constraintName = extractUsingTemplate("Referential constraint", "violation:", sqle.getMessage());
+			} else if (errorCode == 5317) {
+				constraintName = extractUsingTemplate("Check constraint (", ") violated.", sqle.getMessage());
+			}
+
+			if (constraintName != null) {
+				int i = constraintName.indexOf('.');
+				if (i != -1) {
+					constraintName = constraintName.substring(i + 1);
+				}
+			}
+			return constraintName;
+		}
+	};
 }
+
